@@ -997,43 +997,61 @@ pub async fn download_and_install(
 
     std::fs::create_dir_all(plugins_dir)?;
 
-    // Télécharger le ZIP — fallback master→main si 404
+    // Télécharger le ZIP — fallback master → main → HEAD
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .user_agent("PlexMetaForge/1.0")
+        .redirect(reqwest::redirect::Policy::limited(10))
         .build()
         .map_err(PlexMetaForgeError::Http)?;
 
-    let resp = client.get(zip_url).send().await.map_err(PlexMetaForgeError::Http)?;
-
-    let (final_url, resp) = if resp.status() == reqwest::StatusCode::NOT_FOUND {
-        // Essaie l'autre branche (master↔main)
-        let alt = if zip_url.contains("/master.zip") {
-            zip_url.replace("/master.zip", "/main.zip")
-        } else if zip_url.contains("/main.zip") {
-            zip_url.replace("/main.zip", "/master.zip")
-        } else {
-            zip_url.to_string()
-        };
-
-        if alt != zip_url {
-            let r2 = client.get(&alt).send().await.map_err(PlexMetaForgeError::Http)?;
-            (alt, r2)
-        } else {
-            (zip_url.to_string(), resp)
-        }
+    // Construit la liste des URLs à essayer dans l'ordre
+    let head_url = {
+        // Extrait le préfixe repo : https://github.com/owner/repo
+        let base = zip_url
+            .split("/archive/")
+            .next()
+            .unwrap_or(zip_url);
+        format!("{}/archive/HEAD.zip", base)
+    };
+    let alt_branch = if zip_url.contains("/master.zip") {
+        zip_url.replace("/master.zip", "/main.zip")
+    } else if zip_url.contains("/main.zip") {
+        zip_url.replace("/main.zip", "/master.zip")
     } else {
-        (zip_url.to_string(), resp)
+        zip_url.to_string()
     };
 
-    if !resp.status().is_success() {
-        return Err(PlexMetaForgeError::PlexApi(format!(
-            "Téléchargement échoué HTTP {} — {}\nEssayé aussi : {}",
-            resp.status(),
-            zip_url,
-            final_url
-        )));
+    let candidates: Vec<String> = vec![
+        zip_url.to_string(),
+        alt_branch,
+        head_url,
+    ];
+
+    let mut last_status = reqwest::StatusCode::NOT_FOUND;
+    let mut success_resp: Option<reqwest::Response> = None;
+    let mut used_url = zip_url.to_string();
+
+    for url in &candidates {
+        let resp = client.get(url).send().await.map_err(PlexMetaForgeError::Http)?;
+        last_status = resp.status();
+        if resp.status().is_success() {
+            used_url = url.clone();
+            success_resp = Some(resp);
+            break;
+        }
     }
+
+    let resp = match success_resp {
+        Some(r) => r,
+        None => return Err(PlexMetaForgeError::PlexApi(format!(
+            "Téléchargement échoué ({}) pour {} — essayé : {}",
+            last_status,
+            bundle_name,
+            candidates.join(", ")
+        ))),
+    };
+    let _ = used_url; // utilisé pour le debug si besoin
 
     let bytes = resp.bytes().await.map_err(PlexMetaForgeError::Http)?.to_vec();
 
