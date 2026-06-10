@@ -1,23 +1,60 @@
+# ── Build outputs ────────────────────────────────────────────
 node_modules/
 out/
 .next/
 src-tauri/target/
 dist/
+src-tauri/gen/
+
+# ── Logs ─────────────────────────────────────────────────────
 .logs/
+*.log
+
+# ── Secrets & API keys (NEVER commit these) ──────────────────
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.crt
+secrets.json
+secrets.toml
+secrets.yaml
+*secret*
+*private*
+*token*
+*credential*
+# PlexMetaForge settings contain Plex token — never commit
+# %APPDATA%\PlexMetaForge\settings.json is outside the repo (safe)
+# But if someone copies it here accidentally:
+settings.local.json
+plex_token.txt
 
-# Tauri gen (auto-generated)
-src-tauri/gen/
-
-# OS
+# ── OS ───────────────────────────────────────────────────────
 Thumbs.db
 .DS_Store
 desktop.ini
+ehthumbs.db
+[Dd]esktop.ini
 
-# IDE
+# ── IDE ──────────────────────────────────────────────────────
 .vscode/settings.json
 .idea/
 *.suo
 *.user
+*.swp
+*.swo
+.vs/
+
+# ── Tauri ────────────────────────────────────────────────────
+# WiX installer temp files
+*.wixobj
+*.wixpdb
+
+# ── Python (plugins générés) ─────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
