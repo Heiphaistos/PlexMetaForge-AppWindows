@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
+  AppSettings,
   BatchUpdateResult,
   DatabaseStats,
   ExportResult,
@@ -13,12 +14,19 @@ import type {
   PluginTemplateMeta,
 } from './types';
 
+// Settings
+export const getSettings = (): Promise<AppSettings> =>
+  invoke('get_settings');
+
+export const saveSettings = (newSettings: AppSettings): Promise<void> =>
+  invoke('save_settings', { newSettings });
+
+export const testPlexConnection = (): Promise<string> =>
+  invoke('test_plex_connection');
+
 // Config
 export const getPlexPaths = (): Promise<PlexPaths> =>
   invoke('get_plex_paths');
-
-export const setPlexToken = (token: string): Promise<void> =>
-  invoke('set_plex_token', { token });
 
 // Scanner
 export const listPlugins = (): Promise<Plugin[]> =>

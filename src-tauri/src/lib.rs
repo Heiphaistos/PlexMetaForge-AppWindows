@@ -5,50 +5,81 @@ mod export;
 mod generator;
 mod metadata;
 mod scanner;
+mod settings;
 
 use config::PlexPaths;
 use database::{BatchUpdateResult, DatabaseStats, MediaItem, PlexSection};
 use export::ExportResult;
 use generator::PluginConfig;
 use metadata::{InjectionReport, MetadataPayload};
+use settings::AppSettings;
 use std::sync::Mutex;
 use tauri::State;
 
 pub struct AppState {
     pub plex_paths: Mutex<Option<PlexPaths>>,
-    pub plex_token: Mutex<Option<String>>,
+    pub settings: Mutex<AppSettings>,
+}
+
+// ─── Settings ─────────────────────────────────────────────────
+
+#[tauri::command]
+fn get_settings(state: State<AppState>) -> AppSettings {
+    state.settings.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn save_settings(new_settings: AppSettings, state: State<AppState>) -> Result<(), String> {
+    settings::save(&new_settings).map_err(|e| e.to_string())?;
+    *state.settings.lock().unwrap() = new_settings;
+    Ok(())
+}
+
+#[tauri::command]
+async fn test_plex_connection(state: State<'_, AppState>) -> Result<String, String> {
+    let s = state.settings.lock().unwrap().clone();
+    if s.plex_token.is_empty() {
+        return Err("Token Plex vide — configure-le dans Paramètres.".to_string());
+    }
+    metadata::plex_api::test_connection(&s.plex_url, &s.plex_token)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 // ─── Config ───────────────────────────────────────────────────
 
 #[tauri::command]
 fn get_plex_paths(state: State<AppState>) -> Result<serde_json::Value, String> {
+    let s = state.settings.lock().unwrap();
     let guard = state.plex_paths.lock().unwrap();
-    match &*guard {
-        Some(p) => Ok(serde_json::json!({
-            "plugins_dir": p.plugins_dir.to_string_lossy(),
-            "database_path": p.database_path.to_string_lossy(),
-            "plugins_dir_exists": p.plugins_dir_exists(),
-            "database_exists": p.database_exists(),
-        })),
-        None => Err("Plex non détecté (LOCALAPPDATA manquant)".to_string()),
-    }
-}
 
-#[tauri::command]
-fn set_plex_token(token: String, state: State<AppState>) -> Result<(), String> {
-    let mut guard = state.plex_token.lock().unwrap();
-    *guard = if token.trim().is_empty() { None } else { Some(token.trim().to_string()) };
-    Ok(())
+    // Résout les chemins : custom en priorité, sinon auto-détectés
+    let plugins_dir = s.custom_plugins_dir
+        .as_deref()
+        .map(std::path::PathBuf::from)
+        .or_else(|| guard.as_ref().map(|p| p.plugins_dir.clone()));
+    let db_path = s.custom_db_path
+        .as_deref()
+        .map(std::path::PathBuf::from)
+        .or_else(|| guard.as_ref().map(|p| p.database_path.clone()));
+
+    match (plugins_dir, db_path) {
+        (Some(pd), Some(db)) => Ok(serde_json::json!({
+            "plugins_dir": pd.to_string_lossy(),
+            "database_path": db.to_string_lossy(),
+            "plugins_dir_exists": pd.exists(),
+            "database_exists": db.exists(),
+        })),
+        _ => Err("Plex non détecté. Configure les chemins dans Paramètres.".to_string()),
+    }
 }
 
 // ─── Scanner ──────────────────────────────────────────────────
 
 #[tauri::command]
 fn list_plugins(state: State<AppState>) -> Result<Vec<scanner::Plugin>, String> {
-    let guard = state.plex_paths.lock().unwrap();
-    let paths = guard.as_ref().ok_or("Plex paths non initialisés")?;
-    scanner::list_plugins(&paths.plugins_dir).map_err(|e| e.to_string())
+    let plugins_dir = resolve_plugins_dir(&state)?;
+    scanner::list_plugins(&plugins_dir).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -65,38 +96,36 @@ fn delete_plugin(path: String) -> Result<(), String> {
 
 #[tauri::command]
 fn create_plugin(name: String, state: State<AppState>) -> Result<String, String> {
-    let guard = state.plex_paths.lock().unwrap();
-    let paths = guard.as_ref().ok_or("Plex paths non initialisés")?;
-    generator::create_plugin(&paths.plugins_dir, &name).map_err(|e| e.to_string())
+    let plugins_dir = resolve_plugins_dir(&state)?;
+    generator::create_plugin(&plugins_dir, &name).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn create_plugin_from_template(config: PluginConfig, state: State<AppState>) -> Result<String, String> {
-    let guard = state.plex_paths.lock().unwrap();
-    let paths = guard.as_ref().ok_or("Plex paths non initialisés")?;
-    generator::create_plugin_from_config(&paths.plugins_dir, &config).map_err(|e| e.to_string())
+    let plugins_dir = resolve_plugins_dir(&state)?;
+    generator::create_plugin_from_config(&plugins_dir, &config).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn get_plugin_templates() -> serde_json::Value {
     serde_json::json!([
-        { "id": "blank",     "label": "Vierge",              "icon": "📄",
+        { "id": "blank",     "label": "Vierge",                 "icon": "📄",
           "description": "Structure minimale. Tu codes tout toi-même.",
           "requires_tmdb": false, "requires_lastfm": false },
-        { "id": "cinema",    "label": "Films",               "icon": "🎬",
+        { "id": "cinema",    "label": "Films",                  "icon": "🎬",
           "description": "Agent complet films. Titres, synopsis, posters, casting depuis TMDB.",
           "requires_tmdb": true,  "requires_lastfm": false },
-        { "id": "series",    "label": "Séries TV",           "icon": "📺",
+        { "id": "series",    "label": "Séries TV",              "icon": "📺",
           "description": "Agent séries avec épisodes, saisons, vignettes via TMDB.",
           "requires_tmdb": true,  "requires_lastfm": false },
-        { "id": "musique",   "label": "Musique",             "icon": "🎵",
+        { "id": "musique",   "label": "Musique",                "icon": "🎵",
           "description": "Double agent Artiste + Album. Biographies, jaquettes via Last.fm.",
           "requires_tmdb": false, "requires_lastfm": true  },
-        { "id": "anime",     "label": "Anime / Manga",       "icon": "⛩️",
-          "description": "Spécialisé anime/manga via AniList. Titres JP/FR/EN, personnages, doubleurs. Sans clé.",
+        { "id": "anime",     "label": "Anime / Manga",          "icon": "⛩️",
+          "description": "Spécialisé anime/manga via AniList. Sans clé API requise.",
           "requires_tmdb": false, "requires_lastfm": false },
         { "id": "universal", "label": "Universel (All-in-one)", "icon": "🌐",
-          "description": "Films + Séries + Anime + Musique. Détection automatique. TMDB + AniList + Last.fm.",
+          "description": "Films + Séries + Anime + Musique. Détection automatique.",
           "requires_tmdb": true,  "requires_lastfm": false }
     ])
 }
@@ -118,20 +147,15 @@ fn write_plugin_code(path: String, content: String) -> Result<(), String> {
 #[tauri::command]
 fn export_plugin(path: String, dest_dir: Option<String>) -> Result<ExportResult, String> {
     let bundle = std::path::PathBuf::from(&path);
-    let dest = dest_dir
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(export::default_export_dir);
+    let dest = dest_dir.map(std::path::PathBuf::from).unwrap_or_else(export::default_export_dir);
     export::export_plugin_zip(&bundle, &dest).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn export_all_plugins(state: State<AppState>, dest_dir: Option<String>) -> Result<ExportResult, String> {
-    let guard = state.plex_paths.lock().unwrap();
-    let paths = guard.as_ref().ok_or("Plex paths non initialisés")?;
-    let dest = dest_dir
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(export::default_export_dir);
-    export::export_all_plugins_zip(&paths.plugins_dir, &dest).map_err(|e| e.to_string())
+    let plugins_dir = resolve_plugins_dir(&state)?;
+    let dest = dest_dir.map(std::path::PathBuf::from).unwrap_or_else(export::default_export_dir);
+    export::export_all_plugins_zip(&plugins_dir, &dest).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -143,59 +167,95 @@ fn get_export_dir() -> String {
 
 #[tauri::command]
 fn get_db_stats(state: State<AppState>) -> Result<DatabaseStats, String> {
-    let guard = state.plex_paths.lock().unwrap();
-    let paths = guard.as_ref().ok_or("Plex paths non initialisés")?;
-    let db = database::PlexDatabase::open(&paths.database_path).map_err(|e| e.to_string())?;
+    let db = open_db(&state)?;
     db.get_stats().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn get_db_sections(state: State<AppState>) -> Result<Vec<PlexSection>, String> {
-    let guard = state.plex_paths.lock().unwrap();
-    let paths = guard.as_ref().ok_or("Plex paths non initialisés")?;
-    let db = database::PlexDatabase::open(&paths.database_path).map_err(|e| e.to_string())?;
+    let db = open_db(&state)?;
     db.get_sections().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn search_plex_db(query: String, state: State<AppState>) -> Result<Vec<MediaItem>, String> {
-    let guard = state.plex_paths.lock().unwrap();
-    let paths = guard.as_ref().ok_or("Plex paths non initialisés")?;
-    let db = database::PlexDatabase::open(&paths.database_path).map_err(|e| e.to_string())?;
+    let db = open_db(&state)?;
     db.search_metadata_items(&query).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn get_items_by_section(section_id: i64, limit: Option<i64>, state: State<AppState>) -> Result<Vec<MediaItem>, String> {
-    let guard = state.plex_paths.lock().unwrap();
-    let paths = guard.as_ref().ok_or("Plex paths non initialisés")?;
-    let db = database::PlexDatabase::open(&paths.database_path).map_err(|e| e.to_string())?;
+    let db = open_db(&state)?;
     db.get_items_by_section(section_id, limit.unwrap_or(200)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn get_incomplete_items(limit: Option<i64>, state: State<AppState>) -> Result<Vec<MediaItem>, String> {
-    let guard = state.plex_paths.lock().unwrap();
-    let paths = guard.as_ref().ok_or("Plex paths non initialisés")?;
-    let db = database::PlexDatabase::open(&paths.database_path).map_err(|e| e.to_string())?;
+    let db = open_db(&state)?;
     db.get_incomplete_items(limit.unwrap_or(100)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn db_batch_clear_locks(state: State<AppState>) -> Result<BatchUpdateResult, String> {
-    let guard = state.plex_paths.lock().unwrap();
-    let paths = guard.as_ref().ok_or("Plex paths non initialisés")?;
-    let db = database::PlexDatabase::open(&paths.database_path).map_err(|e| e.to_string())?;
+    let db = open_db(&state)?;
     db.batch_clear_locks().map_err(|e| e.to_string())
 }
 
-// ─── Metadata Engine (Module C) ───────────────────────────────
+// ─── Metadata Engine ──────────────────────────────────────────
 
 #[tauri::command]
 async fn inject_metadata(payload: MetadataPayload, state: State<'_, AppState>) -> Result<InjectionReport, String> {
-    let plex_paths = state.plex_paths.lock().unwrap().clone();
-    let plex_token = state.plex_token.lock().unwrap().clone();
-    metadata::inject(payload, plex_paths, plex_token).await.map_err(|e| e.to_string())
+    let s = state.settings.lock().unwrap().clone();
+    let plex_paths = resolve_plex_paths(&state);
+    let token = if s.plex_token.is_empty() { None } else { Some(s.plex_token.clone()) };
+    metadata::inject(payload, plex_paths, s.plex_url, token)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+// ─── Helpers ──────────────────────────────────────────────────
+
+fn resolve_plugins_dir(state: &State<AppState>) -> Result<std::path::PathBuf, String> {
+    let s = state.settings.lock().unwrap();
+    if let Some(ref custom) = s.custom_plugins_dir {
+        return Ok(std::path::PathBuf::from(custom));
+    }
+    drop(s);
+    let guard = state.plex_paths.lock().unwrap();
+    guard
+        .as_ref()
+        .map(|p| p.plugins_dir.clone())
+        .ok_or_else(|| "Dossier Plug-ins introuvable. Configure-le dans ⚙ Paramètres.".to_string())
+}
+
+fn resolve_plex_paths(state: &State<AppState>) -> Option<PlexPaths> {
+    let s = state.settings.lock().unwrap();
+    let guard = state.plex_paths.lock().unwrap();
+    let base = guard.as_ref()?;
+    let plugins_dir = s.custom_plugins_dir
+        .as_deref()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| base.plugins_dir.clone());
+    let database_path = s.custom_db_path
+        .as_deref()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| base.database_path.clone());
+    Some(PlexPaths { plugins_dir, database_path })
+}
+
+fn open_db(state: &State<AppState>) -> Result<database::PlexDatabase, String> {
+    let s = state.settings.lock().unwrap();
+    let db_path = if let Some(ref custom) = s.custom_db_path {
+        std::path::PathBuf::from(custom)
+    } else {
+        drop(s);
+        let guard = state.plex_paths.lock().unwrap();
+        guard
+            .as_ref()
+            .map(|p| p.database_path.clone())
+            .ok_or_else(|| "Base de données introuvable. Configure-la dans ⚙ Paramètres.".to_string())?
+    };
+    database::PlexDatabase::open(&db_path).map_err(|e| e.to_string())
 }
 
 // ─── Entry Point ──────────────────────────────────────────────
@@ -204,17 +264,20 @@ async fn inject_metadata(payload: MetadataPayload, state: State<'_, AppState>) -
 pub fn run() {
     env_logger::init();
     let plex_paths = PlexPaths::detect().ok();
+    let loaded_settings = settings::load();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             plex_paths: Mutex::new(plex_paths),
-            plex_token: Mutex::new(None),
+            settings: Mutex::new(loaded_settings),
         })
         .invoke_handler(tauri::generate_handler![
+            // Settings
+            get_settings, save_settings, test_plex_connection,
             // Config
-            get_plex_paths, set_plex_token,
+            get_plex_paths,
             // Scanner
             list_plugins, toggle_plugin, delete_plugin,
             // Generator

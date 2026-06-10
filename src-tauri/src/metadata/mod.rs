@@ -32,6 +32,7 @@ pub struct InjectionReport {
 pub async fn inject(
     payload: MetadataPayload,
     plex_paths: Option<PlexPaths>,
+    plex_url: String,
     plex_token: Option<String>,
 ) -> Result<InjectionReport> {
     let media_path = PathBuf::from(&payload.media_path);
@@ -72,7 +73,7 @@ pub async fn inject(
 
     // Axe Actif — API Plex, fallback SQLite
     if let Some(ref token) = plex_token {
-        match plex_api::refresh_section(&payload.media_path, token).await {
+        match plex_api::refresh_section(&plex_url, &payload.media_path, token).await {
             Ok(_) => report.plex_api_refreshed = true,
             Err(e) => {
                 report.errors.push(format!("Plex API: {}", e));

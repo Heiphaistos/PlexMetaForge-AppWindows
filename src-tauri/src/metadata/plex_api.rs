@@ -1,8 +1,6 @@
 use serde::Deserialize;
 use crate::error::{PlexMetaForgeError, Result};
 
-const PLEX_BASE: &str = "http://localhost:32400";
-
 #[derive(Deserialize)]
 struct SectionsEnvelope {
     #[serde(rename = "MediaContainer")]
@@ -27,15 +25,52 @@ struct PlexLocation {
     path: String,
 }
 
-pub async fn refresh_section(media_path: &str, token: &str) -> Result<()> {
+pub async fn test_connection(base_url: &str, token: &str) -> Result<String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .map_err(PlexMetaForgeError::Http)?;
+
+    let resp = client
+        .get(format!("{}/identity", base_url))
+        .header("X-Plex-Token", token)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| PlexMetaForgeError::PlexApi(format!("Connexion impossible : {}", e)))?;
+
+    if !resp.status().is_success() {
+        return Err(PlexMetaForgeError::PlexApi(format!(
+            "Plex répond HTTP {} — token invalide ou serveur inaccessible",
+            resp.status()
+        )));
+    }
+
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| PlexMetaForgeError::PlexApi(format!("Réponse invalide : {}", e)))?;
+
+    let version = json
+        .pointer("/MediaContainer/version")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+    let friendly_name = json
+        .pointer("/MediaContainer/friendlyName")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Plex");
+
+    Ok(format!("{} — v{}", friendly_name, version))
+}
+
+pub async fn refresh_section(base_url: &str, media_path: &str, token: &str) -> Result<()> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .map_err(PlexMetaForgeError::Http)?;
 
-    // List sections
     let envelope: SectionsEnvelope = client
-        .get(format!("{}/library/sections", PLEX_BASE))
+        .get(format!("{}/library/sections", base_url))
         .header("X-Plex-Token", token)
         .header("Accept", "application/json")
         .send()
@@ -43,9 +78,8 @@ pub async fn refresh_section(media_path: &str, token: &str) -> Result<()> {
         .map_err(PlexMetaForgeError::Http)?
         .json()
         .await
-        .map_err(|e| PlexMetaForgeError::PlexApi(format!("Parse sections: {}", e)))?;
+        .map_err(|e| PlexMetaForgeError::PlexApi(format!("Parse sections : {}", e)))?;
 
-    // Find section matching media_path prefix
     let key = envelope
         .media_container
         .directories
@@ -58,14 +92,13 @@ pub async fn refresh_section(media_path: &str, token: &str) -> Result<()> {
         .map(|sec| sec.key.clone())
         .ok_or_else(|| {
             PlexMetaForgeError::PlexApi(format!(
-                "Aucune section ne correspond au chemin: {}",
+                "Aucune section ne correspond au chemin : {}",
                 media_path
             ))
         })?;
 
-    // Targeted refresh on section + path
     let resp = client
-        .get(format!("{}/library/sections/{}/refresh", PLEX_BASE, key))
+        .get(format!("{}/library/sections/{}/refresh", base_url, key))
         .header("X-Plex-Token", token)
         .query(&[("path", media_path)])
         .send()

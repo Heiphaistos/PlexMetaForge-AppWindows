@@ -73,6 +73,13 @@ export interface PluginConfig {
   lastfm_api_key?: string;
 }
 
+export interface AppSettings {
+  plex_url: string;
+  plex_token: string;
+  custom_plugins_dir?: string;
+  custom_db_path?: string;
+}
+
 export interface ExportResult {
   zip_path: string;
   file_count: number;
