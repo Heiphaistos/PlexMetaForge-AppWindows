@@ -4,7 +4,10 @@ import { useEffect, useState, useCallback } from 'react';
 import type { InstallResult, StorePlugin } from '@/lib/types';
 import { getStoreCatalog, installStorePlugin, getInstalledPluginIds } from '@/lib/commands';
 
-const CATEGORIES = ['Tous', 'Métadonnées', 'Sous-titres', 'Scanner', 'Musique', 'Utilitaires'];
+const CATEGORIES = [
+  'Tous', 'Métadonnées', 'Sous-titres', 'Scanner',
+  'Musique', 'Audiobooks', 'Comics', 'IPTV', 'Podcast', 'Sync', 'Utilitaires',
+];
 
 export default function StorePage() {
   const [plugins, setPlugins] = useState<StorePlugin[]>([]);
