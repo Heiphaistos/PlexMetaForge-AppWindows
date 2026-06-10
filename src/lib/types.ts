@@ -89,6 +89,26 @@ export interface StorePlugin {
   verified: boolean;
 }
 
+export interface SelectiveConfig {
+  name: string;
+  films: boolean;
+  series: boolean;
+  anime: boolean;
+  music_artist: boolean;
+  music_album: boolean;
+  use_tmdb: boolean;
+  use_anilist: boolean;
+  use_lastfm: boolean;
+  tmdb_key?: string;
+  lastfm_key?: string;
+}
+
+export interface BatchInstallItem {
+  bundle_name: string;
+  ok: boolean;
+  message: string;
+}
+
 export interface StoreCategory {
   name: string;
   subcategories: string[];

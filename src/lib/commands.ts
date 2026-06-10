@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
   AppSettings,
+  BatchInstallItem,
   BatchUpdateResult,
   DatabaseStats,
   ExportResult,
@@ -13,6 +14,7 @@ import type {
   PlexSection,
   PluginConfig,
   PluginTemplateMeta,
+  SelectiveConfig,
   StoreCategory,
   StorePlugin,
 } from './types';
@@ -93,6 +95,16 @@ export const getIncompleteItems = (limit?: number): Promise<MediaItem[]> =>
 
 export const dbBatchClearLocks = (): Promise<BatchUpdateResult> =>
   invoke('db_batch_clear_locks');
+
+// Generator — selective (builder avancé)
+export const createSelectivePlugin = (config: SelectiveConfig): Promise<string> =>
+  invoke('create_selective_plugin', { config });
+
+// Store — batch install
+export const batchInstallPlugins = (
+  plugins: Pick<StorePlugin, 'zip_url' | 'bundle_name'>[]
+): Promise<{ results: BatchInstallItem[] }> =>
+  invoke('batch_install_plugins', { plugins });
 
 // Generator — templates
 export const getPluginTemplates = (): Promise<PluginTemplateMeta[]> =>

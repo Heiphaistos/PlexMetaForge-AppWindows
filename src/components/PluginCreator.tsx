@@ -3,12 +3,16 @@
 import { useState, useEffect } from 'react';
 import type { PluginConfig, PluginTemplateId, PluginTemplateMeta } from '@/lib/types';
 import { getPluginTemplates, createPluginFromTemplate } from '@/lib/commands';
+import SelectiveBuilder from './SelectiveBuilder';
 
 interface Props {
   onCreated: (path: string) => void;
 }
 
+type Tab = 'template' | 'selective';
+
 export default function PluginCreator({ onCreated }: Props) {
+  const [activeTab, setActiveTab] = useState<Tab>('template');
   const [templates, setTemplates] = useState<PluginTemplateMeta[]>([]);
   const [selected, setSelected] = useState<PluginTemplateId>('universal');
   const [name, setName] = useState('');
@@ -52,6 +56,31 @@ export default function PluginCreator({ onCreated }: Props) {
 
   return (
     <div className="space-y-5">
+      {/* Tabs */}
+      <div className="flex gap-1 bg-plex-bg border border-plex-border rounded p-1">
+        {([
+          { id: 'template',  icon: '📄', label: 'Depuis un modèle' },
+          { id: 'selective', icon: '🔧', label: 'Plugin personnalisé' },
+        ] as { id: Tab; icon: string; label: string }[]).map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setActiveTab(t.id)}
+            className={`flex-1 text-xs py-2 rounded font-semibold transition-colors ${
+              activeTab === t.id
+                ? 'bg-plex-accent text-black'
+                : 'text-plex-muted hover:text-plex-text'
+            }`}
+          >
+            {t.icon} {t.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'selective' ? (
+        <SelectiveBuilder onCreated={onCreated} />
+      ) : (
+      <>
       <h2 className="text-sm font-semibold text-plex-muted uppercase tracking-wide">
         Créer un plugin depuis un modèle
       </h2>
@@ -203,6 +232,8 @@ export default function PluginCreator({ onCreated }: Props) {
             )}
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );

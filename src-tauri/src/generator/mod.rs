@@ -1,4 +1,7 @@
+pub mod combiner;
 pub mod templates;
+
+pub use combiner::SelectiveConfig;
 
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
@@ -21,6 +24,72 @@ pub struct PluginConfig {
     pub template: PluginTemplate,
     pub tmdb_api_key: Option<String>,
     pub lastfm_api_key: Option<String>,
+}
+
+// ─── Selective plugin (custom combination) ───────────────────
+
+pub fn create_selective_plugin(plugins_dir: &PathBuf, cfg: &SelectiveConfig) -> Result<String> {
+    let safe_name = cfg.name.trim().replace(' ', "_");
+    let bundle_path = plugins_dir.join(format!("{}.bundle", safe_name));
+
+    let code_dir      = bundle_path.join("Contents").join("Code");
+    let resources_dir = bundle_path.join("Contents").join("Resources");
+    std::fs::create_dir_all(&code_dir)?;
+    std::fs::create_dir_all(&resources_dir)?;
+
+    std::fs::write(
+        bundle_path.join("Contents").join("Info.plist"),
+        templates::info_plist(&safe_name, &cfg.name),
+    )?;
+
+    std::fs::write(
+        bundle_path.join("Contents").join("DefaultPrefs.json"),
+        combiner::prefs_json(cfg),
+    )?;
+
+    let mut code = combiner::generate(cfg);
+
+    // Inject API keys directly into the code if provided
+    if let Some(ref k) = cfg.tmdb_key {
+        if !k.is_empty() {
+            code = code.replace("Prefs[\"tmdb_api_key\"]", &format!("\"{}\"", k));
+        }
+    }
+    if let Some(ref k) = cfg.lastfm_key {
+        if !k.is_empty() {
+            code = code.replace("Prefs.get(\"lastfm_api_key\",\"\")", &format!("\"{}\"", k));
+        }
+    }
+
+    std::fs::write(code_dir.join("__init__.py"), code)?;
+
+    let readme = build_selective_readme(cfg);
+    std::fs::write(resources_dir.join("README.txt"), readme)?;
+
+    Ok(bundle_path.to_string_lossy().to_string())
+}
+
+fn build_selective_readme(cfg: &SelectiveConfig) -> String {
+    let agents: Vec<&str> = [
+        if cfg.films        { "Films (Agent.Movies)" } else { "" },
+        if cfg.series       { "Séries TV (Agent.TV_Shows)" } else { "" },
+        if cfg.anime        { "Anime/Manga (détection automatique)" } else { "" },
+        if cfg.music_artist { "Musique — Artiste (Agent.Artist)" } else { "" },
+        if cfg.music_album  { "Musique — Album (Agent.Album)" } else { "" },
+    ].iter().filter(|s| !s.is_empty()).copied().collect();
+
+    let sources: Vec<&str> = [
+        if cfg.use_tmdb   { "TMDB (films/séries)" } else { "" },
+        if cfg.use_anilist && cfg.anime { "AniList (anime — sans clé)" } else { "" },
+        if cfg.use_lastfm { "Last.fm (musique)" } else { "" },
+    ].iter().filter(|s| !s.is_empty()).copied().collect();
+
+    format!(
+        "Plugin Plex Universel Personnalisé\n{}\n\nAgents : {}\nSources : {}\n\nInstallation :\n1. Copier dans %LOCALAPPDATA%\\Plex Media Server\\Plug-ins\\\n2. Redémarrer Plex\n3. Configurer dans Paramètres > Agents\n",
+        "=".repeat(40),
+        agents.join(", "),
+        sources.join(", ")
+    )
 }
 
 // ─── Simple blank plugin (legacy API) ────────────────────────

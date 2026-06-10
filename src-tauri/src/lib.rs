@@ -12,7 +12,7 @@ use config::PlexPaths;
 use database::{BatchUpdateResult, DatabaseStats, MediaItem, PlexSection};
 use export::ExportResult;
 use store::{InstallResult, StorePlugin};
-use generator::PluginConfig;
+use generator::{PluginConfig, SelectiveConfig};
 use metadata::{InjectionReport, MetadataPayload};
 use settings::AppSettings;
 use std::sync::Mutex;
@@ -109,6 +109,12 @@ fn create_plugin_from_template(config: PluginConfig, state: State<AppState>) -> 
 }
 
 #[tauri::command]
+fn create_selective_plugin(config: SelectiveConfig, state: State<AppState>) -> Result<String, String> {
+    let plugins_dir = resolve_plugins_dir(&state)?;
+    generator::create_selective_plugin(&plugins_dir, &config).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn get_plugin_templates() -> serde_json::Value {
     serde_json::json!([
         { "id": "blank",     "label": "Vierge",                 "icon": "📄",
@@ -199,6 +205,48 @@ async fn install_store_plugin(
     store::download_and_install(&zip_url, &bundle_name, &plugins_dir)
         .await
         .map_err(|e| e.to_string())
+}
+
+#[derive(serde::Serialize)]
+struct BatchInstallResult {
+    results: Vec<BatchItem>,
+}
+
+#[derive(serde::Serialize)]
+struct BatchItem {
+    bundle_name: String,
+    ok: bool,
+    message: String,
+}
+
+#[tauri::command]
+async fn batch_install_plugins(
+    plugins: Vec<serde_json::Value>,
+    state: State<'_, AppState>,
+) -> Result<BatchInstallResult, String> {
+    let plugins_dir = resolve_plugins_dir(&state)?;
+    let mut results = Vec::new();
+
+    for plugin in plugins {
+        let zip_url = plugin["zip_url"].as_str().unwrap_or("").to_string();
+        let bundle_name = plugin["bundle_name"].as_str().unwrap_or("").to_string();
+        if zip_url.is_empty() || bundle_name.is_empty() { continue; }
+
+        match store::download_and_install(&zip_url, &bundle_name, &plugins_dir).await {
+            Ok(r) => results.push(BatchItem {
+                bundle_name: r.bundle_name,
+                ok: true,
+                message: if r.already_existed { "Mis à jour".to_string() } else { "Installé".to_string() },
+            }),
+            Err(e) => results.push(BatchItem {
+                bundle_name: bundle_name.clone(),
+                ok: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    Ok(BatchInstallResult { results })
 }
 
 #[tauri::command]
@@ -354,10 +402,11 @@ pub fn run() {
             // Scanner
             list_plugins, toggle_plugin, delete_plugin,
             // Generator
-            create_plugin, create_plugin_from_template, get_plugin_templates,
+            create_plugin, create_plugin_from_template, create_selective_plugin, get_plugin_templates,
             read_plugin_code, write_plugin_code,
             // Store
-            get_store_catalog, get_store_categories, install_store_plugin, get_installed_plugin_ids,
+            get_store_catalog, get_store_categories,
+            install_store_plugin, batch_install_plugins, get_installed_plugin_ids,
             // Export
             export_plugin, export_all_plugins, get_export_dir,
             // Database

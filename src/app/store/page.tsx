@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import type { InstallResult, StoreCategory, StorePlugin } from '@/lib/types';
-import { getStoreCatalog, getStoreCategories, installStorePlugin, getInstalledPluginIds } from '@/lib/commands';
+import { getStoreCatalog, getStoreCategories, installStorePlugin, getInstalledPluginIds, batchInstallPlugins } from '@/lib/commands';
 
 type Filter = { category: string; subcategory: string };
 
@@ -29,6 +29,8 @@ export default function StorePage() {
   const [loading, setLoading] = useState(true);
   const [installing, setInstalling] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, { ok: boolean; msg: string }>>({});
+  const [selection, setSelection] = useState<Set<string>>(new Set());
+  const [batchBusy, setBatchBusy] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -61,6 +63,41 @@ export default function StorePage() {
       setResults((r) => ({ ...r, [plugin.id]: { ok: false, msg: String(e) } }));
     } finally {
       setInstalling(null);
+    }
+  };
+
+  const toggleSelect = (id: string) =>
+    setSelection((s) => {
+      const n = new Set(s);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+
+  const selectAll = () =>
+    setSelection(new Set(filtered.filter((p) => p.verified !== false).map((p) => p.id)));
+
+  const clearSelection = () => setSelection(new Set());
+
+  const handleBatchInstall = async () => {
+    const toInstall = plugins
+      .filter((p) => selection.has(p.id) && p.verified !== false)
+      .map((p) => ({ zip_url: p.zip_url, bundle_name: p.bundle_name }));
+    if (!toInstall.length) return;
+    setBatchBusy(true);
+    try {
+      const { results: batchResults } = await batchInstallPlugins(toInstall);
+      const newResults: Record<string, { ok: boolean; msg: string }> = {};
+      for (const r of batchResults) {
+        const plugin = plugins.find((p) => p.bundle_name === r.bundle_name);
+        if (plugin) newResults[plugin.id] = { ok: r.ok, msg: r.ok ? `✓ ${r.message}` : `✗ ${r.message}` };
+      }
+      setResults((prev) => ({ ...prev, ...newResults }));
+      getInstalledPluginIds().then((ids) => setInstalled(new Set(ids)));
+      setSelection(new Set());
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setBatchBusy(false);
     }
   };
 
@@ -181,6 +218,33 @@ export default function StorePage() {
           </button>
         </div>
 
+        {/* Barre de sélection batch */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={selectAll}
+            className="text-xs px-2.5 py-1.5 rounded border border-plex-border text-plex-muted hover:text-plex-text hover:border-plex-muted transition-colors"
+          >
+            ☑ Tout sélectionner ({filtered.filter((p) => p.verified !== false).length})
+          </button>
+          {selection.size > 0 && (
+            <>
+              <button
+                onClick={clearSelection}
+                className="text-xs px-2.5 py-1.5 rounded border border-plex-border text-plex-muted hover:text-plex-text transition-colors"
+              >
+                ✕ Désélectionner
+              </button>
+              <button
+                onClick={handleBatchInstall}
+                disabled={batchBusy || installing !== null}
+                className="text-xs px-3 py-1.5 rounded bg-plex-accent text-black font-bold hover:bg-yellow-400 disabled:opacity-50 transition-colors"
+              >
+                {batchBusy ? '⬇ Installation…' : `⬇ Installer la sélection (${selection.size})`}
+              </button>
+            </>
+          )}
+        </div>
+
         {/* Breadcrumb */}
         <div className="text-xs text-plex-muted">
           {filter.category === 'Tous' ? 'Tous les plugins' : filter.category}
@@ -201,11 +265,23 @@ export default function StorePage() {
               const busy = installing === plugin.id;
               const disabled = busy || (installing !== null && !busy);
 
+              const isSelected = selection.has(plugin.id);
+
               return (
                 <div key={plugin.id}
-                  className="bg-plex-surface border border-plex-border rounded p-4 space-y-2.5">
+                  className={`bg-plex-surface border rounded p-4 space-y-2.5 transition-colors ${
+                    isSelected ? 'border-plex-accent/60' : 'border-plex-border'
+                  }`}>
                   {/* Header */}
                   <div className="flex items-start gap-3">
+                    {plugin.verified !== false && (
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleSelect(plugin.id)}
+                        className="mt-1 accent-yellow-400 flex-shrink-0"
+                      />
+                    )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-sm font-bold text-plex-text">{plugin.name}</span>
