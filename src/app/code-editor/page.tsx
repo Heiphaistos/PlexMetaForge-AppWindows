@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import CodeEditor from '@/components/CodeEditor';
 import { readPluginCode, writePluginCode } from '@/lib/commands';
 
-export default function CodeEditorPage() {
+function CodeEditorInner() {
   const searchParams = useSearchParams();
   const pluginPath = searchParams.get('path') ?? '';
 
@@ -49,12 +49,8 @@ export default function CodeEditorPage() {
           )}
         </div>
         <div className="flex gap-2 items-center">
-          {saved && (
-            <span className="text-xs text-green-400">Sauvegardé ✓</span>
-          )}
-          {error && (
-            <span className="text-xs text-red-400">{error}</span>
-          )}
+          {saved && <span className="text-xs text-green-400">Sauvegardé ✓</span>}
+          {error && <span className="text-xs text-red-400">{error}</span>}
           <button
             onClick={handleSave}
             disabled={saving || !pluginPath}
@@ -79,5 +75,19 @@ export default function CodeEditorPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function CodeEditorPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center h-full text-plex-muted text-sm">
+          Chargement...
+        </div>
+      }
+    >
+      <CodeEditorInner />
+    </Suspense>
   );
 }
