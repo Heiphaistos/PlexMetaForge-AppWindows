@@ -1058,7 +1058,19 @@ pub async fn download_and_install(
             continue;
         }
 
+        // FIX C11 — Zip Slip: rejeter toute entrée contenant ".." ou NUL
+        if relative.contains("..") || relative.contains('\0') {
+            log::warn!("Zip Slip détecté, entrée ignorée : {}", raw_path);
+            continue;
+        }
+
         let dest = target.join(relative.replace('/', std::path::MAIN_SEPARATOR_STR));
+
+        // Vérifier que dest reste à l'intérieur de target
+        if !dest.starts_with(&target) {
+            log::warn!("Zip Slip (path escape) détecté, entrée ignorée : {}", raw_path);
+            continue;
+        }
 
         if raw_path.ends_with('/') {
             std::fs::create_dir_all(&dest)?;

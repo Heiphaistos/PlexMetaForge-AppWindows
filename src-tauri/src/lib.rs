@@ -133,14 +133,44 @@ fn get_plugin_templates() -> serde_json::Value {
 }
 
 #[tauri::command]
-fn read_plugin_code(path: String) -> Result<String, String> {
-    let init = std::path::PathBuf::from(&path).join("Contents").join("Code").join("__init__.py");
+fn read_plugin_code(path: String, state: State<'_, AppState>) -> Result<String, String> {
+    let plugins_dir = resolve_plugins_dir(&state)?;
+    let plugin_path = std::path::PathBuf::from(&path);
+    // FIX H1 — Vérifier que le chemin reste dans le dossier plugins
+    let canonical_plugins = plugins_dir
+        .canonicalize()
+        .map_err(|e| format!("Dossier plugins inaccessible: {}", e))?;
+    let canonical_plugin = plugin_path
+        .canonicalize()
+        .map_err(|e| format!("Chemin plugin invalide: {}", e))?;
+    if !canonical_plugin.starts_with(&canonical_plugins) {
+        return Err("Accès refusé: chemin hors du dossier plugins".to_string());
+    }
+    let init = canonical_plugin
+        .join("Contents")
+        .join("Code")
+        .join("__init__.py");
     std::fs::read_to_string(init).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn write_plugin_code(path: String, content: String) -> Result<(), String> {
-    let init = std::path::PathBuf::from(&path).join("Contents").join("Code").join("__init__.py");
+fn write_plugin_code(path: String, content: String, state: State<'_, AppState>) -> Result<(), String> {
+    let plugins_dir = resolve_plugins_dir(&state)?;
+    let plugin_path = std::path::PathBuf::from(&path);
+    // FIX H1 — Vérifier que le chemin reste dans le dossier plugins
+    let canonical_plugins = plugins_dir
+        .canonicalize()
+        .map_err(|e| format!("Dossier plugins inaccessible: {}", e))?;
+    let canonical_plugin = plugin_path
+        .canonicalize()
+        .map_err(|e| format!("Chemin plugin invalide: {}", e))?;
+    if !canonical_plugin.starts_with(&canonical_plugins) {
+        return Err("Accès refusé: chemin hors du dossier plugins".to_string());
+    }
+    let init = canonical_plugin
+        .join("Contents")
+        .join("Code")
+        .join("__init__.py");
     std::fs::write(init, content).map_err(|e| e.to_string())
 }
 
