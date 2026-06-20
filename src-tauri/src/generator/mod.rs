@@ -106,8 +106,39 @@ pub fn create_plugin(plugins_dir: &PathBuf, plugin_name: &str) -> Result<String>
 // ─── Template-based creation ──────────────────────────────────
 
 pub fn create_plugin_from_config(plugins_dir: &PathBuf, config: &PluginConfig) -> Result<String> {
-    let safe_name = config.name.trim().replace(' ', "_");
+    // Sanitise le nom : conserve uniquement les caractères alphanum, tirets, underscores, points.
+    // Interdit ".." et tout caractère de séparation de chemin pour éviter path traversal.
+    let safe_name: String = config.name.trim()
+        .chars()
+        .map(|c| if c.is_alphanumeric() || matches!(c, '-' | '_' | '.') { c } else { '_' })
+        .collect::<String>()
+        .trim_matches('.')
+        .to_string();
+
+    if safe_name.is_empty() || safe_name == ".." {
+        return Err(crate::error::PlexMetaForgeError::PlexApi(
+            "Nom de plugin invalide".to_string()
+        ));
+    }
+
+    // Garde-fou : vérifie que bundle_path reste sous plugins_dir
     let bundle_path = plugins_dir.join(format!("{}.bundle", safe_name));
+    if let (Ok(canonical_dir), Ok(canonical_bundle)) = (
+        plugins_dir.canonicalize().or_else(|_| {
+            std::fs::create_dir_all(plugins_dir).ok();
+            plugins_dir.canonicalize()
+        }),
+        {
+            std::fs::create_dir_all(&bundle_path).ok();
+            bundle_path.canonicalize()
+        }
+    ) {
+        if !canonical_bundle.starts_with(&canonical_dir) {
+            return Err(crate::error::PlexMetaForgeError::PlexApi(
+                "Accès refusé : chemin plugin hors du dossier Plug-ins".to_string()
+            ));
+        }
+    }
 
     let code_dir      = bundle_path.join("Contents").join("Code");
     let resources_dir = bundle_path.join("Contents").join("Resources");

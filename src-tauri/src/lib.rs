@@ -85,13 +85,38 @@ fn list_plugins(state: State<AppState>) -> Result<Vec<scanner::Plugin>, String> 
 }
 
 #[tauri::command]
-fn toggle_plugin(path: String, enable: bool) -> Result<String, String> {
-    scanner::toggle_plugin(&std::path::PathBuf::from(path), enable).map_err(|e| e.to_string())
+fn toggle_plugin(path: String, enable: bool, state: State<AppState>) -> Result<String, String> {
+    let plugins_dir = resolve_plugins_dir(&state)?;
+    let plugin_path = std::path::PathBuf::from(&path);
+    // FIX — Confinement : le plugin doit rester sous le dossier plugins
+    let canonical_plugins = plugins_dir.canonicalize()
+        .map_err(|e| format!("Dossier plugins inaccessible: {}", e))?;
+    // Le path peut pointer vers .disabled — on normalise en ignorant le suffixe
+    let base_path = std::path::PathBuf::from(
+        path.trim_end_matches(".disabled")
+    );
+    let canonical_plugin = base_path.canonicalize()
+        .or_else(|_| plugin_path.canonicalize())
+        .map_err(|e| format!("Chemin plugin invalide: {}", e))?;
+    if !canonical_plugin.starts_with(&canonical_plugins) {
+        return Err("Accès refusé: chemin hors du dossier plugins".to_string());
+    }
+    scanner::toggle_plugin(&plugin_path, enable).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn delete_plugin(path: String) -> Result<(), String> {
-    scanner::delete_plugin(&std::path::PathBuf::from(path)).map_err(|e| e.to_string())
+fn delete_plugin(path: String, state: State<AppState>) -> Result<(), String> {
+    let plugins_dir = resolve_plugins_dir(&state)?;
+    let plugin_path = std::path::PathBuf::from(&path);
+    // FIX — Confinement : le plugin doit rester sous le dossier plugins
+    let canonical_plugins = plugins_dir.canonicalize()
+        .map_err(|e| format!("Dossier plugins inaccessible: {}", e))?;
+    let canonical_plugin = plugin_path.canonicalize()
+        .map_err(|e| format!("Chemin plugin invalide: {}", e))?;
+    if !canonical_plugin.starts_with(&canonical_plugins) {
+        return Err("Accès refusé: chemin hors du dossier plugins".to_string());
+    }
+    scanner::delete_plugin(&plugin_path).map_err(|e| e.to_string())
 }
 
 // ─── Generator ────────────────────────────────────────────────
@@ -263,8 +288,17 @@ fn get_installed_plugin_ids(state: State<AppState>) -> Vec<String> {
 // ─── Export ───────────────────────────────────────────────────
 
 #[tauri::command]
-fn export_plugin(path: String, dest_dir: Option<String>) -> Result<ExportResult, String> {
+fn export_plugin(path: String, dest_dir: Option<String>, state: State<AppState>) -> Result<ExportResult, String> {
     let bundle = std::path::PathBuf::from(&path);
+    // FIX — Confinement : le bundle doit rester sous le dossier plugins
+    let plugins_dir = resolve_plugins_dir(&state)?;
+    let canonical_plugins = plugins_dir.canonicalize()
+        .map_err(|e| format!("Dossier plugins inaccessible: {}", e))?;
+    let canonical_bundle = bundle.canonicalize()
+        .map_err(|e| format!("Chemin bundle invalide: {}", e))?;
+    if !canonical_bundle.starts_with(&canonical_plugins) {
+        return Err("Accès refusé: chemin hors du dossier plugins".to_string());
+    }
     let dest = dest_dir.map(std::path::PathBuf::from).unwrap_or_else(export::default_export_dir);
     export::export_plugin_zip(&bundle, &dest).map_err(|e| e.to_string())
 }

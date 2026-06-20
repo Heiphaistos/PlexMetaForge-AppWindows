@@ -25,7 +25,31 @@ struct PlexLocation {
     path: String,
 }
 
+/// Valide que l'URL Plex est une URL http/https légitime.
+/// Permet localhost (Plex tourne souvent en local) mais bloque les schémas dangereux
+/// et les tentatives de SSRF vers metadata cloud (AWS/GCP).
+fn validate_plex_url(url: &str) -> Result<()> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err(PlexMetaForgeError::PlexApi(
+            "URL Plex invalide : doit commencer par http:// ou https://".to_string()
+        ));
+    }
+    let lower = url.to_lowercase();
+    // Bloque les endpoints de metadata cloud (SSRF vers infra cloud)
+    let blocked = ["169.254.169.254", "metadata.google.internal", "metadata.aws",
+                   "100.100.100.200"]; // Alibaba Cloud metadata
+    for pattern in &blocked {
+        if lower.contains(pattern) {
+            return Err(PlexMetaForgeError::PlexApi(format!(
+                "URL Plex refusée (endpoint cloud interdit) : {}", url
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub async fn test_connection(base_url: &str, token: &str) -> Result<String> {
+    validate_plex_url(base_url)?;
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(8))
         .build()
@@ -64,6 +88,7 @@ pub async fn test_connection(base_url: &str, token: &str) -> Result<String> {
 }
 
 pub async fn refresh_section(base_url: &str, media_path: &str, token: &str) -> Result<()> {
+    validate_plex_url(base_url)?;
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
