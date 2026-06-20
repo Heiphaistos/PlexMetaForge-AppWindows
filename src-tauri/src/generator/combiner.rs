@@ -125,7 +125,7 @@ def ValidatePrefs():
         ));
     }
     if checks.is_empty() {
-        out.push_str("    pass\n");
+        out.push_str("    return MessageContainer(\"OK\", \"Agent prêt.\")\n");
     } else {
         for c in &checks { out.push_str(c); out.push('\n'); }
         out.push_str("    return MessageContainer(\"OK\", \"Agent prêt.\")\n");

@@ -1032,13 +1032,21 @@ pub async fn download_and_install(
     let mut success_resp: Option<reqwest::Response> = None;
     let mut used_url = zip_url.to_string();
 
+    // Déduplique les candidats (cas où alt_branch == zip_url)
+    let mut seen = std::collections::HashSet::new();
+    let candidates: Vec<String> = candidates.into_iter().filter(|u| seen.insert(u.clone())).collect();
+
     for url in &candidates {
-        let resp = client.get(url).send().await.map_err(PlexMetaForgeError::Http)?;
-        last_status = resp.status();
-        if resp.status().is_success() {
-            used_url = url.clone();
-            success_resp = Some(resp);
-            break;
+        match client.get(url).send().await {
+            Err(_) => continue, // Erreur réseau → essaie l'URL suivante
+            Ok(resp) => {
+                last_status = resp.status();
+                if resp.status().is_success() {
+                    used_url = url.clone();
+                    success_resp = Some(resp);
+                    break;
+                }
+            }
         }
     }
 

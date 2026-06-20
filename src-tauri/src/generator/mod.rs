@@ -144,15 +144,17 @@ pub fn create_plugin_from_config(plugins_dir: &PathBuf, config: &PluginConfig) -
         PluginTemplate::Blank     => blank_init_py(&config.name),
     };
 
-    // Injecter les clés API si fournies
+    // Injecter les clés API directement dans le code si fournies
     if let Some(ref k) = config.tmdb_api_key {
         if !k.is_empty() {
-            init_py = init_py.replace("YOUR_TMDB_API_KEY_HERE", k);
+            init_py = init_py.replace(r#"Prefs["tmdb_api_key"]"#, &format!("\"{}\"", k));
         }
     }
     if let Some(ref k) = config.lastfm_api_key {
         if !k.is_empty() {
-            init_py = init_py.replace("YOUR_LASTFM_API_KEY_HERE", k);
+            init_py = init_py.replace(r#"Prefs["lastfm_api_key"]"#, &format!("\"{}\"", k));
+            // Variante Prefs.get() utilisée dans certains templates
+            init_py = init_py.replace(r#"Prefs.get("lastfm_api_key","")"#, &format!("\"{}\"", k));
         }
     }
 
