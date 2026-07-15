@@ -8,11 +8,14 @@ pub fn update_metadata(paths: &PlexPaths, payload: &MetadataPayload) -> Result<u
 
     let item = db.get_media_item_by_title(&payload.title)?;
     let updated = match item {
-        Some(item) => db.update_metadata(
+        Some(item) => db.update_metadata_full(
             item.id,
             &payload.title,
             payload.year,
             payload.plot.as_deref().unwrap_or(""),
+            payload.tagline.as_deref(),
+            payload.studio.as_deref(),
+            payload.rating,
         )?,
         None => 0,
     };

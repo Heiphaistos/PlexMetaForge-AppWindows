@@ -58,3 +58,4 @@ ehthumbs.db
 __pycache__/
 *.pyc
 *.pyo
+tsconfig.tsbuildinfo

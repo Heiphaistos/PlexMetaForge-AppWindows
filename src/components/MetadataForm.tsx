@@ -8,7 +8,7 @@ interface Props {
   selected: MediaItem | null;
 }
 
-type FormData = Omit<MetadataPayload, 'year'> & { year: string };
+type FormData = Omit<MetadataPayload, 'year' | 'rating'> & { year: string; rating: string };
 
 const EMPTY: FormData = {
   title: '',
@@ -18,6 +18,9 @@ const EMPTY: FormData = {
   fanart_url: '',
   tmdb_id: '',
   imdb_id: '',
+  tagline: '',
+  studio: '',
+  rating: '',
   media_path: '',
 };
 
@@ -39,6 +42,9 @@ export default function MetadataForm({ selected }: Props) {
       fanart_url: '',
       tmdb_id: '',
       imdb_id: '',
+      tagline: '',
+      studio: '',
+      rating: '',
       media_path: '',
     });
   }, [selected]);
@@ -59,6 +65,7 @@ export default function MetadataForm({ selected }: Props) {
     const payload: MetadataPayload = {
       ...form,
       year: form.year ? Number(form.year) : undefined,
+      rating: form.rating ? Number(form.rating) : undefined,
     };
 
     try {
@@ -122,6 +129,28 @@ export default function MetadataForm({ selected }: Props) {
           label="URL Fanart"
           value={form.fanart_url ?? ''}
           onChange={(v) => set('fanart_url', v)}
+        />
+      </div>
+
+      <Field
+        label="Tagline"
+        value={form.tagline ?? ''}
+        onChange={(v) => set('tagline', v)}
+        placeholder="ex: Rien n'est impossible."
+      />
+
+      <div className="grid grid-cols-2 gap-3">
+        <Field
+          label="Studio"
+          value={form.studio ?? ''}
+          onChange={(v) => set('studio', v)}
+        />
+        <Field
+          label="Note (0-10)"
+          type="number"
+          value={form.rating ?? ''}
+          onChange={(v) => set('rating', v)}
+          placeholder="ex: 7.5"
         />
       </div>
 

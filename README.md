@@ -111,7 +111,7 @@ Clic sur **🔌 Tester la connexion Plex** dans Paramètres → doit afficher `�
 ## Build depuis les sources
 
 ```bash
-git clone https://github.com/heiphaistos44-crypto/PlexMetaForge.git
+git clone https://github.com/Heiphaistos/PlexMetaForge.git
 cd PlexMetaForge
 npm install
 npx tauri dev        # mode développement

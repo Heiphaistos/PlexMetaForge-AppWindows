@@ -16,6 +16,9 @@ pub struct MetadataPayload {
     pub fanart_url: Option<String>,
     pub tmdb_id: Option<String>,
     pub imdb_id: Option<String>,
+    pub tagline: Option<String>,
+    pub studio: Option<String>,
+    pub rating: Option<f64>,
     pub media_path: String,
 }
 

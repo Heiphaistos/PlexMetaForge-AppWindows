@@ -344,15 +344,6 @@ impl PlexDatabase {
 
     // ─── Write ──────────────────────────────────────────────
 
-    pub fn update_metadata(&self, id: i64, title: &str, year: Option<i32>, summary: &str) -> Result<usize> {
-        let n = self.conn.execute(
-            "UPDATE metadata_items SET title = ?1, year = ?2, summary = ?3 WHERE id = ?4",
-            params![title, year, summary, id],
-        )?;
-        Ok(n)
-    }
-
-    #[allow(dead_code)]
     pub fn update_metadata_full(
         &self,
         id: i64,

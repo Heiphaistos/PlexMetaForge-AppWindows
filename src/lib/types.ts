@@ -28,6 +28,9 @@ export interface MetadataPayload {
   fanart_url?: string;
   tmdb_id?: string;
   imdb_id?: string;
+  tagline?: string;
+  studio?: string;
+  rating?: number;
   media_path: string;
 }
 
