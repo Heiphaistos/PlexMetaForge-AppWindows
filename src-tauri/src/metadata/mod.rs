@@ -110,13 +110,40 @@ fn try_sqlite_update(
     }
 }
 
-async fn download_image(url: &str, dest: &PathBuf) -> Result<()> {
-    if !url.starts_with("http://") && !url.starts_with("https://") {
+/// Valide qu'une URL est HTTPS vers un domaine public (bloque SSRF vers réseau interne).
+fn validate_image_url(url: &str) -> Result<()> {
+    // Exige HTTPS uniquement pour les images externes (poster/fanart depuis TMDB/TVDB/etc.)
+    if !url.starts_with("https://") {
         return Err(PlexMetaForgeError::PlexApi(format!(
-            "URL invalide (doit commencer par http/https) : {}",
+            "URL invalide (HTTPS requis) : {}",
             url
         )));
     }
+    // Bloque les cibles SSRF connues : localhost, 127.x, 192.168.x, 10.x, 172.16-31.x, [::1]
+    let lower = url.to_lowercase();
+    let blocked = ["localhost", "127.", "192.168.", "10.", "[::1]", "0.0.0.0",
+                   "169.254.", "metadata.google", "169.254.169.254"];
+    for pattern in &blocked {
+        if lower.contains(pattern) {
+            return Err(PlexMetaForgeError::PlexApi(format!(
+                "URL refusée (cible interne interdite) : {}",
+                url
+            )));
+        }
+    }
+    // Vérifie les plages 172.16.0.0/12
+    for i in 16u8..=31 {
+        if lower.contains(&format!("172.{}.", i)) {
+            return Err(PlexMetaForgeError::PlexApi(
+                "URL refusée (réseau privé 172.16-31.x)".to_string()
+            ));
+        }
+    }
+    Ok(())
+}
+
+async fn download_image(url: &str, dest: &PathBuf) -> Result<()> {
+    validate_image_url(url)?;
     let resp = reqwest::get(url).await.map_err(PlexMetaForgeError::Http)?;
     if !resp.status().is_success() {
         return Err(PlexMetaForgeError::PlexApi(format!(
