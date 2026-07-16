@@ -28,6 +28,19 @@ fn build_xml(p: &MetadataPayload) -> String {
             lines.push(format!("  <plot>{}</plot>", xml_escape(plot)));
         }
     }
+    if let Some(ref tagline) = p.tagline {
+        if !tagline.is_empty() {
+            lines.push(format!("  <tagline>{}</tagline>", xml_escape(tagline)));
+        }
+    }
+    if let Some(ref studio) = p.studio {
+        if !studio.is_empty() {
+            lines.push(format!("  <studio>{}</studio>", xml_escape(studio)));
+        }
+    }
+    if let Some(rating) = p.rating {
+        lines.push(format!("  <rating>{}</rating>", rating));
+    }
     if let Some(ref url) = p.poster_url {
         if !url.is_empty() {
             lines.push(format!(

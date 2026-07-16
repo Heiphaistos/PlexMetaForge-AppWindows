@@ -159,3 +159,82 @@ async fn download_image(url: &str, dest: &PathBuf) -> Result<()> {
     std::fs::write(dest, bytes)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn make_fixture_db(dir: &PathBuf) -> PathBuf {
+        let db_path = dir.join("com.plexapp.plugins.library.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute(
+            "CREATE TABLE metadata_items (
+                id INTEGER PRIMARY KEY,
+                title TEXT, year INTEGER, summary TEXT, user_thumb_url TEXT,
+                metadata_type INTEGER, library_section_id INTEGER, duration INTEGER,
+                rating REAL, tagline TEXT, studio TEXT, originally_available_at TEXT
+            )",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO metadata_items (id, title, year, summary, metadata_type)
+             VALUES (1, 'Test Movie', 2020, 'old summary', 1)",
+            [],
+        ).unwrap();
+        db_path
+    }
+
+    #[test]
+    fn inject_writes_nfo_and_full_sqlite_row_when_no_plex_token() {
+        let base = std::env::temp_dir().join(format!("pmf_test_{}", std::process::id()));
+        let media_dir = base.join("Test Movie (2020)");
+        std::fs::create_dir_all(&media_dir).unwrap();
+        let db_path = make_fixture_db(&base);
+
+        let payload = MetadataPayload {
+            title: "Test Movie".to_string(),
+            year: Some(2020),
+            plot: Some("A new summary".to_string()),
+            poster_url: None,
+            fanart_url: None,
+            tmdb_id: Some("550".to_string()),
+            imdb_id: None,
+            tagline: Some("Rien n'est impossible.".to_string()),
+            studio: Some("Test Studio".to_string()),
+            rating: Some(7.5),
+            media_path: media_dir.to_string_lossy().to_string(),
+        };
+
+        let plex_paths = PlexPaths {
+            plugins_dir: base.clone(),
+            database_path: db_path.clone(),
+        };
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let report = rt.block_on(inject(payload, Some(plex_paths), String::new(), None)).unwrap();
+
+        assert!(report.nfo_written, "NFO devrait être écrit: {:?}", report.errors);
+        assert!(report.sqlite_updated, "SQLite devrait être mis à jour: {:?}", report.errors);
+
+        // Vérifie le contenu NFO réel sur disque
+        let nfo_content = std::fs::read_to_string(media_dir.join("Test Movie (2020).nfo")).unwrap();
+        assert!(nfo_content.contains("<tagline>Rien n&apos;est impossible.</tagline>"));
+        assert!(nfo_content.contains("<studio>Test Studio</studio>"));
+        assert!(nfo_content.contains("<rating>7.5</rating>"));
+
+        // Vérifie la ligne SQLite réellement persistée
+        let conn = Connection::open(&db_path).unwrap();
+        let (summary, tagline, studio, rating): (String, String, String, f64) = conn.query_row(
+            "SELECT summary, tagline, studio, rating FROM metadata_items WHERE id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).unwrap();
+        assert_eq!(summary, "A new summary");
+        assert_eq!(tagline, "Rien n'est impossible.");
+        assert_eq!(studio, "Test Studio");
+        assert_eq!(rating, 7.5);
+
+        std::fs::remove_dir_all(&base).ok();
+    }
+}
