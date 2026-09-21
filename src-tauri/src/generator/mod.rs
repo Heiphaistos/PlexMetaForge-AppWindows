@@ -29,7 +29,24 @@ pub struct PluginConfig {
 // ─── Selective plugin (custom combination) ───────────────────
 
 pub fn create_selective_plugin(plugins_dir: &PathBuf, cfg: &SelectiveConfig) -> Result<String> {
-    let safe_name = cfg.name.trim().replace(' ', "_");
+    // Même sanitisation que `create_plugin_from_config` plus bas : `cfg.name` arrive
+    // brut d'une commande Tauri, et remplacer seulement les espaces laisserait passer
+    // `..` et les séparateurs de chemin, donc l'écriture hors du dossier des plugins.
+    let safe_name: String = cfg
+        .name
+        .trim()
+        .chars()
+        .map(|c| if c.is_alphanumeric() || matches!(c, '-' | '_' | '.') { c } else { '_' })
+        .collect::<String>()
+        .trim_matches('.')
+        .to_string();
+
+    if safe_name.is_empty() || safe_name == ".." {
+        return Err(crate::error::PlexMetaForgeError::PlexApi(
+            "Nom de plugin invalide".to_string(),
+        ));
+    }
+
     let bundle_path = plugins_dir.join(format!("{}.bundle", safe_name));
 
     let code_dir      = bundle_path.join("Contents").join("Code");

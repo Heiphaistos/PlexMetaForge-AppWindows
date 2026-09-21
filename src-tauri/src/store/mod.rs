@@ -980,13 +980,38 @@ pub struct InstallResult {
     pub already_existed: bool,
 }
 
+/// Refuse tout nom de bundle capable de sortir du dossier des plugins.
+/// Seuls les caractères alphanumériques, `-`, `_` et `.` sont acceptés.
+fn sanitize_bundle_name(name: &str) -> Result<String> {
+    let trimmed = name.trim();
+    let invalid = trimmed.is_empty()
+        || trimmed == "."
+        || trimmed == ".."
+        || trimmed.contains("..")
+        || !trimmed
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.'));
+
+    if invalid {
+        return Err(crate::error::PlexMetaForgeError::PlexApi(format!(
+            "Nom de bundle invalide : {name}"
+        )));
+    }
+    Ok(trimmed.to_string())
+}
+
 pub async fn download_and_install(
     zip_url: &str,
     bundle_name: &str,
     plugins_dir: &PathBuf,
 ) -> Result<InstallResult> {
+    // `bundle_name` arrive brut d'une commande Tauri. `PathBuf::join` avec un chemin
+    // absolu REMPLACE la base : sans ce garde, un nom absolu ou contenant `..` ferait
+    // porter le `remove_dir_all` ci-dessous sur un dossier arbitraire du disque.
+    let bundle_name = sanitize_bundle_name(bundle_name)?;
+
     // Cible finale : plugins_dir / bundle_name
-    let target = plugins_dir.join(bundle_name);
+    let target = plugins_dir.join(&bundle_name);
     let already_existed = target.exists();
 
     // Backup si déjà installé
@@ -1068,7 +1093,7 @@ pub async fn download_and_install(
     let mut archive = zip::ZipArchive::new(cursor)?;
 
     // Trouve le dossier racine dans le ZIP (ex: "Hama.bundle-master/")
-    let zip_root = find_zip_root(&mut archive, bundle_name)?;
+    let zip_root = find_zip_root(&mut archive, &bundle_name)?;
 
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
