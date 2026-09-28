@@ -4,6 +4,7 @@ mod error;
 mod export;
 mod generator;
 mod metadata;
+mod path_guard;
 mod scanner;
 mod settings;
 mod store;
@@ -27,19 +28,22 @@ pub struct AppState {
 
 #[tauri::command]
 fn get_settings(state: State<AppState>) -> AppSettings {
-    state.settings.lock().unwrap().clone()
+    state.settings.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 #[tauri::command]
 fn save_settings(new_settings: AppSettings, state: State<AppState>) -> Result<(), String> {
+    if let Some(ref dir) = new_settings.custom_plugins_dir {
+        validate_custom_plugins_dir(std::path::Path::new(dir))?;
+    }
     settings::save(&new_settings).map_err(|e| e.to_string())?;
-    *state.settings.lock().unwrap() = new_settings;
+    *state.settings.lock().unwrap_or_else(|e| e.into_inner()) = new_settings;
     Ok(())
 }
 
 #[tauri::command]
 async fn test_plex_connection(state: State<'_, AppState>) -> Result<String, String> {
-    let s = state.settings.lock().unwrap().clone();
+    let s = state.settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
     if s.plex_token.is_empty() {
         return Err("Token Plex vide — configure-le dans Paramètres.".to_string());
     }
@@ -54,16 +58,16 @@ async fn test_plex_connection(state: State<'_, AppState>) -> Result<String, Stri
 fn get_plex_paths(state: State<AppState>) -> Result<serde_json::Value, String> {
     // Clone settings first, then drop lock before acquiring plex_paths lock
     let (custom_plugins, custom_db) = {
-        let s = state.settings.lock().unwrap();
+        let s = state.settings.lock().unwrap_or_else(|e| e.into_inner());
         (s.custom_plugins_dir.clone(), s.custom_db_path.clone())
     };
 
     let plugins_dir = custom_plugins
         .map(std::path::PathBuf::from)
-        .or_else(|| state.plex_paths.lock().unwrap().as_ref().map(|p| p.plugins_dir.clone()));
+        .or_else(|| state.plex_paths.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|p| p.plugins_dir.clone()));
     let db_path = custom_db
         .map(std::path::PathBuf::from)
-        .or_else(|| state.plex_paths.lock().unwrap().as_ref().map(|p| p.database_path.clone()));
+        .or_else(|| state.plex_paths.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|p| p.database_path.clone()));
 
     match (plugins_dir, db_path) {
         (Some(pd), Some(db)) => Ok(serde_json::json!({
@@ -98,9 +102,7 @@ fn toggle_plugin(path: String, enable: bool, state: State<AppState>) -> Result<S
     let canonical_plugin = base_path.canonicalize()
         .or_else(|_| plugin_path.canonicalize())
         .map_err(|e| format!("Chemin plugin invalide: {}", e))?;
-    if !canonical_plugin.starts_with(&canonical_plugins) {
-        return Err("Accès refusé: chemin hors du dossier plugins".to_string());
-    }
+    ensure_direct_child(&canonical_plugin, &canonical_plugins)?;
     scanner::toggle_plugin(&plugin_path, enable).map_err(|e| e.to_string())
 }
 
@@ -113,10 +115,8 @@ fn delete_plugin(path: String, state: State<AppState>) -> Result<(), String> {
         .map_err(|e| format!("Dossier plugins inaccessible: {}", e))?;
     let canonical_plugin = plugin_path.canonicalize()
         .map_err(|e| format!("Chemin plugin invalide: {}", e))?;
-    if !canonical_plugin.starts_with(&canonical_plugins) {
-        return Err("Accès refusé: chemin hors du dossier plugins".to_string());
-    }
-    scanner::delete_plugin(&plugin_path).map_err(|e| e.to_string())
+    ensure_direct_child(&canonical_plugin, &canonical_plugins)?;
+    scanner::delete_plugin(&canonical_plugin).map_err(|e| e.to_string())
 }
 
 // ─── Generator ────────────────────────────────────────────────
@@ -299,14 +299,14 @@ fn export_plugin(path: String, dest_dir: Option<String>, state: State<AppState>)
     if !canonical_bundle.starts_with(&canonical_plugins) {
         return Err("Accès refusé: chemin hors du dossier plugins".to_string());
     }
-    let dest = dest_dir.map(std::path::PathBuf::from).unwrap_or_else(export::default_export_dir);
+    let dest = export_dest(dest_dir)?;
     export::export_plugin_zip(&bundle, &dest).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn export_all_plugins(state: State<AppState>, dest_dir: Option<String>) -> Result<ExportResult, String> {
     let plugins_dir = resolve_plugins_dir(&state)?;
-    let dest = dest_dir.map(std::path::PathBuf::from).unwrap_or_else(export::default_export_dir);
+    let dest = export_dest(dest_dir)?;
     export::export_all_plugins_zip(&plugins_dir, &dest).map_err(|e| e.to_string())
 }
 
@@ -357,7 +357,7 @@ fn db_batch_clear_locks(state: State<AppState>) -> Result<BatchUpdateResult, Str
 
 #[tauri::command]
 async fn inject_metadata(payload: MetadataPayload, state: State<'_, AppState>) -> Result<InjectionReport, String> {
-    let s = state.settings.lock().unwrap().clone();
+    let s = state.settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let plex_paths = resolve_plex_paths(&state);
     let token = if s.plex_token.is_empty() { None } else { Some(s.plex_token.clone()) };
     metadata::inject(payload, plex_paths, s.plex_url, token)
@@ -367,13 +367,68 @@ async fn inject_metadata(payload: MetadataPayload, state: State<'_, AppState>) -
 
 // ─── Helpers ──────────────────────────────────────────────────
 
+/// Un plugin doit être un enfant DIRECT du dossier Plug-ins (jamais le dossier lui-même ni une racine).
+fn ensure_direct_child(canonical_plugin: &std::path::Path, canonical_plugins: &std::path::Path) -> Result<(), String> {
+    if canonical_plugin.parent() != Some(canonical_plugins) {
+        return Err("Accès refusé: chemin hors du dossier plugins".to_string());
+    }
+    Ok(())
+}
+
+/// Dossier Plug-ins personnalisé : dossier existant nommé `Plug-ins`.
+fn validate_custom_plugins_dir(dir: &std::path::Path) -> Result<(), String> {
+    let canonical = dir.canonicalize().map_err(|e| format!("Dossier Plug-ins invalide: {e}"))?;
+    let named_ok = canonical.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("Plug-ins"));
+    if !canonical.is_dir() || !named_ok {
+        return Err("Le dossier personnalisé doit être un dossier « Plug-ins » existant".to_string());
+    }
+    Ok(())
+}
+
+/// Dossier d'export : défaut, ou dossier choisi validé par la garde des zones système.
+fn export_dest(dest_dir: Option<String>) -> Result<std::path::PathBuf, String> {
+    match dest_dir {
+        Some(d) => path_guard::check_write_target(std::path::Path::new(&d)),
+        None => Ok(export::default_export_dir()),
+    }
+}
+
+#[cfg(test)]
+mod lib_tests {
+    use super::*;
+
+    #[test]
+    fn plugins_dir_itself_is_not_a_plugin() {
+        let base = std::env::temp_dir().join("pmf_lib_tests").join("Plug-ins");
+        let child = base.join("X.bundle");
+        std::fs::create_dir_all(&child).unwrap();
+        let cb = base.canonicalize().unwrap();
+        assert!(ensure_direct_child(&cb, &cb).is_err());
+        assert!(ensure_direct_child(cb.parent().unwrap(), &cb).is_err());
+        assert!(ensure_direct_child(&child.canonicalize().unwrap(), &cb).is_ok());
+        assert!(validate_custom_plugins_dir(&base).is_ok());
+        assert!(validate_custom_plugins_dir(base.parent().unwrap()).is_err());
+        assert!(validate_custom_plugins_dir(&base.join("nope")).is_err());
+    }
+
+    #[test]
+    fn export_dest_refuses_system_dir() {
+        #[cfg(windows)]
+        let sys = std::env::var("SystemRoot").unwrap();
+        #[cfg(not(windows))]
+        let sys = "/etc".to_string();
+        assert!(export_dest(Some(sys)).is_err());
+        assert!(export_dest(None).is_ok());
+    }
+}
+
 fn resolve_plugins_dir(state: &State<AppState>) -> Result<std::path::PathBuf, String> {
-    let s = state.settings.lock().unwrap();
+    let s = state.settings.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(ref custom) = s.custom_plugins_dir {
         return Ok(std::path::PathBuf::from(custom));
     }
     drop(s);
-    let guard = state.plex_paths.lock().unwrap();
+    let guard = state.plex_paths.lock().unwrap_or_else(|e| e.into_inner());
     guard
         .as_ref()
         .map(|p| p.plugins_dir.clone())
@@ -383,10 +438,10 @@ fn resolve_plugins_dir(state: &State<AppState>) -> Result<std::path::PathBuf, St
 fn resolve_plex_paths(state: &State<AppState>) -> Option<PlexPaths> {
     // Clone settings first to avoid holding two locks simultaneously
     let (custom_plugins, custom_db) = {
-        let s = state.settings.lock().unwrap();
+        let s = state.settings.lock().unwrap_or_else(|e| e.into_inner());
         (s.custom_plugins_dir.clone(), s.custom_db_path.clone())
     };
-    let guard = state.plex_paths.lock().unwrap();
+    let guard = state.plex_paths.lock().unwrap_or_else(|e| e.into_inner());
     let base = guard.as_ref()?;
     let plugins_dir = custom_plugins
         .map(std::path::PathBuf::from)
@@ -398,12 +453,12 @@ fn resolve_plex_paths(state: &State<AppState>) -> Option<PlexPaths> {
 }
 
 fn open_db(state: &State<AppState>) -> Result<database::PlexDatabase, String> {
-    let s = state.settings.lock().unwrap();
+    let s = state.settings.lock().unwrap_or_else(|e| e.into_inner());
     let db_path = if let Some(ref custom) = s.custom_db_path {
         std::path::PathBuf::from(custom)
     } else {
         drop(s);
-        let guard = state.plex_paths.lock().unwrap();
+        let guard = state.plex_paths.lock().unwrap_or_else(|e| e.into_inner());
         guard
             .as_ref()
             .map(|p| p.database_path.clone())
