@@ -41,6 +41,21 @@ fn save_settings(new_settings: AppSettings, state: State<AppState>) -> Result<()
     Ok(())
 }
 
+/// Vrai pour une copie posee par l'installeur NSIS (temoin : `uninstall.exe`
+/// a cote de l'executable). Une copie portable ne peut pas etre remplacee par
+/// l'updater Tauri : l'interface renvoie alors vers la page des versions.
+#[tauri::command]
+fn is_installed_build() -> bool {
+    if !cfg!(windows) {
+        return true;
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|p| p.join("uninstall.exe")))
+        .map(|p| p.is_file())
+        .unwrap_or(false)
+}
+
 #[tauri::command]
 async fn test_plex_connection(state: State<'_, AppState>) -> Result<String, String> {
     let s = state.settings.lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -478,13 +493,15 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(AppState {
             plex_paths: Mutex::new(plex_paths),
             settings: Mutex::new(loaded_settings),
         })
         .invoke_handler(tauri::generate_handler![
             // Settings
-            get_settings, save_settings, test_plex_connection,
+            get_settings, save_settings, test_plex_connection, is_installed_build,
             // Config
             get_plex_paths,
             // Scanner

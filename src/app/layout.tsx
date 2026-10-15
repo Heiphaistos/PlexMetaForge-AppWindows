@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import '@/styles/globals.css';
+import UpdateBoot from '@/components/UpdateBoot';
 
 export const metadata: Metadata = {
   title: 'PlexMetaForge',
@@ -48,13 +49,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
           {/* Version */}
           <div className="px-4 py-3 text-xs text-plex-muted border-t border-plex-border">
-            v1.0.0
+            v1.5.0
           </div>
         </aside>
 
         {/* Main content */}
         <main className="flex-1 overflow-auto bg-plex-bg">
           {children}
+          <UpdateBoot />
         </main>
       </body>
     </html>

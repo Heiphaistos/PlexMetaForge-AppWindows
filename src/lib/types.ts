@@ -128,6 +128,7 @@ export interface AppSettings {
   plex_token: string;
   custom_plugins_dir?: string;
   custom_db_path?: string;
+  auto_update_check: boolean;
 }
 
 export interface ExportResult {

@@ -23,6 +23,9 @@ import type {
 export const getSettings = (): Promise<AppSettings> =>
   invoke('get_settings');
 
+export const isInstalledBuild = (): Promise<boolean> =>
+  invoke('is_installed_build');
+
 export const saveSettings = (newSettings: AppSettings): Promise<void> =>
   invoke('save_settings', { newSettings });
 

@@ -8,6 +8,13 @@ pub struct AppSettings {
     pub plex_token: String,
     pub custom_plugins_dir: Option<String>,
     pub custom_db_path: Option<String>,
+    /// Verification silencieuse des mises a jour au demarrage.
+    #[serde(default = "default_true")]
+    pub auto_update_check: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for AppSettings {
@@ -17,6 +24,7 @@ impl Default for AppSettings {
             plex_token: String::new(),
             custom_plugins_dir: None,
             custom_db_path: None,
+            auto_update_check: true,
         }
     }
 }

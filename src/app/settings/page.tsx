@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { AppSettings } from '@/lib/types';
+import { checkForUpdate } from '@/lib/updater';
 import { getSettings, saveSettings, testPlexConnection } from '@/lib/commands';
 
 export default function SettingsPage() {
@@ -10,6 +11,7 @@ export default function SettingsPage() {
     plex_token: '',
     custom_plugins_dir: '',
     custom_db_path: '',
+    auto_update_check: true,
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -62,6 +64,13 @@ export default function SettingsPage() {
     } catch (e) {
       setTestResult({ ok: false, msg: String(e) });
     } finally { setTesting(false); }
+  };
+
+  const [upd, setUpd] = useState<{ busy: boolean; percent: number | null }>({ busy: false, percent: null });
+  const handleCheckUpdate = async () => {
+    setUpd({ busy: true, percent: null });
+    try { await checkForUpdate(false, (p) => setUpd({ busy: true, percent: p })); }
+    finally { setUpd({ busy: false, percent: null }); }
   };
 
   if (loading) return (
@@ -154,6 +163,34 @@ export default function SettingsPage() {
             placeholder="%LOCALAPPDATA%\Plex Media Server\Plug-in Support\Databases\*.db"
             hint="Laisse vide pour utiliser la DB Plex standard."
           />
+        </section>
+
+        {/* Mises à jour */}
+        <section className="bg-plex-surface border border-plex-border rounded p-4 space-y-3">
+          <h2 className="text-sm font-semibold text-plex-muted uppercase tracking-wide">
+            Mises à jour
+          </h2>
+          <label className="flex items-center gap-2 text-sm text-plex-text">
+            <input
+              type="checkbox"
+              checked={form.auto_update_check}
+              onChange={(e) => set('auto_update_check', e.target.checked)}
+            />
+            Vérifier les mises à jour automatiquement
+          </label>
+          <p className="text-xs text-plex-muted opacity-70">
+            Pense à sauvegarder pour appliquer ce réglage.
+          </p>
+          <button
+            type="button"
+            onClick={handleCheckUpdate}
+            disabled={upd.busy}
+            className="w-full py-2 bg-plex-border text-plex-text text-sm rounded hover:bg-plex-accent hover:text-black disabled:opacity-50 transition-colors font-medium"
+          >
+            {upd.busy
+              ? upd.percent === null ? 'Recherche en cours…' : `Téléchargement… ${upd.percent} %`
+              : 'Rechercher une mise à jour'}
+          </button>
         </section>
 
         {error && (
