@@ -1,0 +1,65 @@
+name: Release
+
+# Construit l'installeur Windows signe et l'attache a la release GitHub avec
+# son .sig et latest.json (manifeste de mise a jour). Se lance sur un tag v*.
+# Sans le secret TAURI_SIGNING_PRIVATE_KEY, le build se fait sans artefacts
+# de mise a jour et le job ne casse pas.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      # L'empreinte du certificat de signature de code n'existe que sur le PC de Momo.
+      - name: Drop local code-signing thumbprint
+        shell: bash
+        run: node -e "const f='src-tauri/tauri.windows.conf.json',fs=require('fs'),c=JSON.parse(fs.readFileSync(f));delete c.bundle.windows;fs.writeFileSync(f,JSON.stringify(c))"
+
+      - name: Build
+        shell: bash
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::warning::TAURI_SIGNING_PRIVATE_KEY absent : build sans artefacts de mise a jour"
+            npx tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
+          else
+            npx tauri build
+          fi
+
+      - name: Assemble latest.json
+        if: env.TAURI_SIGNING_PRIVATE_KEY != ''
+        shell: bash
+        run: node scripts/make-latest-json.mjs
+
+      - name: Attach to GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dir=src-tauri/target/release/bundle/nsis
+          files=$(ls $dir/*-setup.exe $dir/*-setup.exe.sig $dir/latest.json 2>/dev/null || true)
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "Voir CHANGELOG.md"
+          gh release upload "$GITHUB_REF_NAME" $files --clobber

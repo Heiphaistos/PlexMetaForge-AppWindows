@@ -108,6 +108,14 @@ Clic sur **🔌 Tester la connexion Plex** dans Paramètres → doit afficher `�
 
 ---
 
+## Mises à jour
+
+L'installeur se met à jour tout seul : vérification silencieuse au démarrage, dialogue (version et nouveautés), téléchargement avec progression, signature minisign contrôlée, installation silencieuse puis relance. Paramètres : case « Vérifier les mises à jour automatiquement » et bouton « Rechercher une mise à jour ».
+
+La version portable ne se met pas à jour toute seule : l'application renvoie vers la page des versions, il faut remplacer le fichier à la main.
+
+Publication : pousser un tag `v*` lance `.github/workflows/release.yml` (secret `TAURI_SIGNING_PRIVATE_KEY` requis pour joindre la signature et `latest.json`).
+
 ## Build depuis les sources
 
 ```bash
