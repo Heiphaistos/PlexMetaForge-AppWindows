@@ -34,11 +34,6 @@ jobs:
 
       - run: npm ci
 
-      # L'empreinte du certificat de signature de code n'existe que sur le PC de Momo.
-      - name: Drop local code-signing thumbprint
-        shell: bash
-        run: node -e "const f='src-tauri/tauri.windows.conf.json',fs=require('fs'),c=JSON.parse(fs.readFileSync(f));delete c.bundle.windows;fs.writeFileSync(f,JSON.stringify(c))"
-
       - name: Build
         shell: bash
         run: |
