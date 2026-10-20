@@ -53,7 +53,7 @@ export default function StorePage() {
     setInstalling(plugin.id);
     setResults((r) => ({ ...r, [plugin.id]: { ok: false, msg: '' } }));
     try {
-      const res: InstallResult = await installStorePlugin(plugin.zip_url, plugin.bundle_name);
+      const res: InstallResult = await installStorePlugin(plugin.bundle_name);
       const msg = res.already_existed
         ? `✓ Mis à jour : ${res.bundle_name}`
         : `✓ Installé : ${res.bundle_name}`;
@@ -81,7 +81,7 @@ export default function StorePage() {
   const handleBatchInstall = async () => {
     const toInstall = plugins
       .filter((p) => selection.has(p.id) && p.verified !== false)
-      .map((p) => ({ zip_url: p.zip_url, bundle_name: p.bundle_name }));
+      .map((p) => ({ bundle_name: p.bundle_name }));
     if (!toInstall.length) return;
     setBatchBusy(true);
     try {

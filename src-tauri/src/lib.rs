@@ -28,7 +28,7 @@ pub struct AppState {
 
 #[tauri::command]
 fn get_settings(state: State<AppState>) -> AppSettings {
-    state.settings.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    settings::masked(&state.settings.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
 #[tauri::command]
@@ -36,8 +36,10 @@ fn save_settings(new_settings: AppSettings, state: State<AppState>) -> Result<()
     if let Some(ref dir) = new_settings.custom_plugins_dir {
         validate_custom_plugins_dir(std::path::Path::new(dir))?;
     }
-    settings::save(&new_settings).map_err(|e| e.to_string())?;
-    *state.settings.lock().unwrap_or_else(|e| e.into_inner()) = new_settings;
+    let mut current = state.settings.lock().unwrap_or_else(|e| e.into_inner());
+    let merged = settings::merge_incoming(&current, new_settings);
+    settings::save(&merged).map_err(|e| e.to_string())?;
+    *current = merged;
     Ok(())
 }
 
@@ -236,12 +238,11 @@ fn get_store_categories() -> serde_json::Value {
 
 #[tauri::command]
 async fn install_store_plugin(
-    zip_url: String,
     bundle_name: String,
     state: State<'_, AppState>,
 ) -> Result<InstallResult, String> {
     let plugins_dir = resolve_plugins_dir(&state)?;
-    store::download_and_install(&zip_url, &bundle_name, &plugins_dir)
+    store::download_and_install(&bundle_name, &plugins_dir)
         .await
         .map_err(|e| e.to_string())
 }
@@ -267,11 +268,11 @@ async fn batch_install_plugins(
     let mut results = Vec::new();
 
     for plugin in plugins {
-        let zip_url = plugin["zip_url"].as_str().unwrap_or("").to_string();
+        // L'URL est retrouvee dans le catalogue : `zip_url` envoye par l'interface est ignore.
         let bundle_name = plugin["bundle_name"].as_str().unwrap_or("").to_string();
-        if zip_url.is_empty() || bundle_name.is_empty() { continue; }
+        if bundle_name.is_empty() { continue; }
 
-        match store::download_and_install(&zip_url, &bundle_name, &plugins_dir).await {
+        match store::download_and_install(&bundle_name, &plugins_dir).await {
             Ok(r) => results.push(BatchItem {
                 bundle_name: r.bundle_name,
                 ok: true,

@@ -9,6 +9,7 @@ export default function SettingsPage() {
   const [form, setForm] = useState<AppSettings>({
     plex_url: 'http://localhost:32400',
     plex_token: '',
+    plex_token_set: false,
     custom_plugins_dir: '',
     custom_db_path: '',
     auto_update_check: true,
@@ -27,6 +28,12 @@ export default function SettingsPage() {
       .finally(() => setLoading(false));
   }, []);
 
+
+  const reload = () =>
+    getSettings()
+      .then((s) => setForm({ ...s, custom_plugins_dir: s.custom_plugins_dir ?? '', custom_db_path: s.custom_db_path ?? '' }))
+      .catch(() => {});
+
   const set = <K extends keyof AppSettings>(k: K, v: AppSettings[K]) =>
     setForm((p) => ({ ...p, [k]: v }));
 
@@ -39,6 +46,7 @@ export default function SettingsPage() {
         custom_plugins_dir: form.custom_plugins_dir?.trim() || undefined,
         custom_db_path: form.custom_db_path?.trim() || undefined,
       } as AppSettings);
+      await reload();
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (e) { setError(String(e)); }
@@ -54,6 +62,7 @@ export default function SettingsPage() {
         custom_plugins_dir: form.custom_plugins_dir?.trim() || undefined,
         custom_db_path: form.custom_db_path?.trim() || undefined,
       } as AppSettings);
+      await reload();
     } catch { /* ignore */ }
     setSaving(false);
 
@@ -106,9 +115,18 @@ export default function SettingsPage() {
               type="password"
               value={form.plex_token}
               onChange={(e) => set('plex_token', e.target.value)}
-              placeholder="Colle ton token ici…"
+              placeholder={form.plex_token_set ? '•••••• enregistré (laisse vide pour le garder)' : 'Colle ton token ici…'}
               className="w-full bg-plex-bg border border-plex-border rounded px-3 py-2 text-sm font-mono text-plex-text placeholder-plex-muted focus:outline-none focus:border-plex-accent"
             />
+            {form.plex_token_set && (
+              <button
+                type="button"
+                onClick={() => setForm((p) => ({ ...p, plex_token: '', plex_token_set: false }))}
+                className="text-xs text-plex-muted underline hover:text-plex-text"
+              >
+                Retirer le token enregistré (puis Enregistrer)
+              </button>
+            )}
             <div className="bg-plex-bg border border-plex-border rounded p-3 text-xs text-plex-muted space-y-1.5 mt-1">
               <div className="font-semibold text-plex-text">Comment trouver ton token :</div>
               <div>1. Ouvre Plex Web : <code className="text-plex-accent">http://localhost:32400/web</code></div>
@@ -125,7 +143,7 @@ export default function SettingsPage() {
           <button
             type="button"
             onClick={handleTest}
-            disabled={testing || saving || !form.plex_token.trim()}
+            disabled={testing || saving || !form.plex_token.trim() && !form.plex_token_set}
             className="w-full py-2 bg-plex-border text-plex-text text-sm rounded hover:bg-plex-accent hover:text-black disabled:opacity-50 transition-colors font-medium"
           >
             {testing ? 'Test en cours…' : '🔌 Tester la connexion Plex'}

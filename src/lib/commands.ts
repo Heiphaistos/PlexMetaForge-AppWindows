@@ -67,8 +67,8 @@ export const getStoreCatalog = (): Promise<StorePlugin[]> =>
 export const getStoreCategories = (): Promise<StoreCategory[]> =>
   invoke('get_store_categories');
 
-export const installStorePlugin = (zipUrl: string, bundleName: string): Promise<InstallResult> =>
-  invoke('install_store_plugin', { zipUrl, bundleName });
+export const installStorePlugin = (bundleName: string): Promise<InstallResult> =>
+  invoke('install_store_plugin', { bundleName });
 
 export const getInstalledPluginIds = (): Promise<string[]> =>
   invoke('get_installed_plugin_ids');
@@ -105,7 +105,7 @@ export const createSelectivePlugin = (config: SelectiveConfig): Promise<string> 
 
 // Store — batch install
 export const batchInstallPlugins = (
-  plugins: Pick<StorePlugin, 'zip_url' | 'bundle_name'>[]
+  plugins: Pick<StorePlugin, 'bundle_name'>[]
 ): Promise<{ results: BatchInstallItem[] }> =>
   invoke('batch_install_plugins', { plugins });
 

@@ -1000,8 +1000,27 @@ fn sanitize_bundle_name(name: &str) -> Result<String> {
     Ok(trimmed.to_string())
 }
 
+const ALLOWED_HOSTS: [&str; 2] = ["github.com", "codeload.github.com"];
+
+fn is_allowed_url(url: &reqwest::Url) -> bool {
+    url.scheme() == "https" && url.host_str().is_some_and(|h| ALLOWED_HOSTS.contains(&h))
+}
+
+/// URL du ZIP d'un plugin du catalogue (jamais fournie par l'interface), hote verifie.
+fn catalog_zip_url(bundle_name: &str) -> Result<&'static str> {
+    let url = catalog()
+        .into_iter()
+        .find(|p| p.bundle_name == bundle_name)
+        .map(|p| p.zip_url)
+        .ok_or_else(|| PlexMetaForgeError::PluginNotFound(bundle_name.to_string()))?;
+    let parsed = reqwest::Url::parse(url).map_err(|e| PlexMetaForgeError::PlexApi(e.to_string()))?;
+    if !is_allowed_url(&parsed) {
+        return Err(PlexMetaForgeError::PermissionDenied(format!("hote non autorise : {url}")));
+    }
+    Ok(url)
+}
+
 pub async fn download_and_install(
-    zip_url: &str,
     bundle_name: &str,
     plugins_dir: &PathBuf,
 ) -> Result<InstallResult> {
@@ -1009,6 +1028,7 @@ pub async fn download_and_install(
     // absolu REMPLACE la base : sans ce garde, un nom absolu ou contenant `..` ferait
     // porter le `remove_dir_all` ci-dessous sur un dossier arbitraire du disque.
     let bundle_name = sanitize_bundle_name(bundle_name)?;
+    let zip_url = catalog_zip_url(&bundle_name)?;
 
     // Cible finale : plugins_dir / bundle_name
     let target = plugins_dir.join(&bundle_name);
@@ -1026,7 +1046,15 @@ pub async fn download_and_install(
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .user_agent("PlexMetaForge/1.0")
-        .redirect(reqwest::redirect::Policy::limited(10))
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= 10 {
+                attempt.error("trop de redirections")
+            } else if is_allowed_url(attempt.url()) {
+                attempt.follow()
+            } else {
+                attempt.error("redirection vers un hote non autorise")
+            }
+        }))
         .build()
         .map_err(PlexMetaForgeError::Http)?;
 
@@ -1097,7 +1125,7 @@ pub async fn download_and_install(
 
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
-        let raw_path = file.name().to_string();
+        let raw_path = file.name()?.to_string();
 
         // Retire le préfixe racine du ZIP
         let relative = match raw_path.strip_prefix(&zip_root) {
@@ -1152,7 +1180,7 @@ fn find_zip_root(archive: &mut zip::ZipArchive<std::io::Cursor<Vec<u8>>>, bundle
     let mut top_dirs: Vec<String> = Vec::new();
     for i in 0..archive.len() {
         let file = archive.by_index(i)?;
-        let name = file.name().to_string();
+        let name = file.name()?.to_string();
         if name.ends_with('/') {
             // Top-level: no slash before the trailing slash
             let trimmed = name.trim_end_matches('/');
@@ -1186,4 +1214,31 @@ fn find_zip_root(archive: &mut zip::ZipArchive<std::io::Cursor<Vec<u8>>>, bundle
     Err(PlexMetaForgeError::PlexApi(
         "Impossible de trouver le dossier racine dans le ZIP".to_string()
     ))
+}
+
+#[cfg(test)]
+mod catalog_url_tests {
+    use super::*;
+
+    #[test]
+    fn every_catalog_url_is_on_an_allowed_host() {
+        for p in catalog() {
+            assert!(catalog_zip_url(p.bundle_name).is_ok(), "{}", p.bundle_name);
+        }
+    }
+
+    #[test]
+    fn unknown_bundle_has_no_url() {
+        assert!(catalog_zip_url("Evil.bundle").is_err());
+        assert!(catalog_zip_url("https://evil.example/x.zip").is_err());
+    }
+
+    #[test]
+    fn only_https_github_hosts_are_allowed() {
+        let ok = |u: &str| is_allowed_url(&reqwest::Url::parse(u).unwrap());
+        assert!(ok("https://codeload.github.com/a/b/zip/HEAD"));
+        assert!(!ok("http://github.com/a/b.zip"));
+        assert!(!ok("https://github.com.evil.example/a.zip"));
+        assert!(!ok("https://127.0.0.1/a.zip"));
+    }
 }

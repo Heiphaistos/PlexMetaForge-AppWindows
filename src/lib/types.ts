@@ -126,6 +126,7 @@ export interface InstallResult {
 export interface AppSettings {
   plex_url: string;
   plex_token: string;
+  plex_token_set: boolean;
   custom_plugins_dir?: string;
   custom_db_path?: string;
   auto_update_check: boolean;
