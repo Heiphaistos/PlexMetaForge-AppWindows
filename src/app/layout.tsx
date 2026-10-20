@@ -49,7 +49,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
           {/* Version */}
           <div className="px-4 py-3 text-xs text-plex-muted border-t border-plex-border">
-            v1.5.0
+            v1.6.0
           </div>
         </aside>
 
